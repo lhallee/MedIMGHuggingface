@@ -21,6 +21,8 @@ api = HfApi()
 batch_size = 10000
 image_file_paths = []
 parquet_file = 'images.parquet'
+data = []
+split, counter = 1, 0 # change split based on where starting
 
 
 # Remove existing parquet file if it exists
@@ -41,8 +43,6 @@ for folder in folders:
 print(f"Found {len(image_file_paths)} image files in total")
 
 
-data = []
-split, counter = 1, 0
 # Process images in batches
 for image_path in tqdm(image_file_paths, desc='Reading'):
     try:
