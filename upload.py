@@ -13,7 +13,8 @@ from PIL import Image
 from glob import glob
 
 
-def main(args, api):
+def main(args):
+    test = args.test
     repo_id = args.repo_id
     image_extensions = args.image_extensions
     medical_image_extensions = args.medical_image_extensions
@@ -22,6 +23,11 @@ def main(args, api):
     counter = args.counter
     split = args.split
     image_file_paths, data = [], []
+
+    if not test:
+        api = HfApi()
+        create_repo(repo_id=repo_id, repo_type='dataset', exist_ok=True)
+
     # Remove existing parquet file if it exists
     if os.path.exists(parquet_file):
         os.remove(parquet_file)
@@ -29,14 +35,14 @@ def main(args, api):
     # Collect image file paths
     for folder in folders:
         folder_file_paths = []
-        for dirpath, dirnames, filenames in os.walk(folder):
+        for dirpath, dirnames, filenames in tqdm(os.walk(folder)):
             for filename in filenames:
                 file_path = os.path.join(dirpath, filename)
                 # Check if the file has a known image extension
                 if filename.lower().endswith(image_extensions + medical_image_extensions):
                     folder_file_paths.append(file_path)
-                elif '.raw' in filename.lower():
-                    # these are read by .mhd
+                elif filename.lower().endswith(args.extensions_to_ignore):
+                    # .raw are read by .mhd
                     continue
                 else:
                     # Try to open files without a recognized extension to check if they are images
@@ -46,7 +52,7 @@ def main(args, api):
                         # Verify the image can be opened
                         Image.open(io.BytesIO(img_bytes))
                         folder_file_paths.append(file_path)
-                        #print(f"Found image file without known extension: {file_path}")
+                        print(f"Found file without known extension: {file_path}")
                     except Exception as e:
                         pass
         print(f"Found {len(folder_file_paths)} image files in {folder}")
@@ -82,8 +88,6 @@ def main(args, api):
                 try:
                     # .mdh files read the .raw with GetArrayFromImage
                     image_array = sitk.GetArrayFromImage(sitk.ReadImage(image_path))
-                    if '.mhd' in image_path.lower():
-                        print(image_array.shape)
                     num_slices = image_array.shape[0]
                     if num_slices > 10:
                         indices = np.linspace(0, num_slices - 1, 10).astype(int)
@@ -123,7 +127,7 @@ def main(args, api):
             print(f"Error processing {image_path}: {e}")
 
         # Save data in batches
-        if counter > batch_size:
+        if counter > batch_size and not test:
             table = pa.Table.from_pandas(pd.DataFrame(data))
             pq.write_table(table, parquet_file, row_group_size=100)
 
@@ -143,7 +147,7 @@ def main(args, api):
             counter = 0
 
     # Save any remaining data
-    if counter > 0:
+    if counter > 0 and not test:
         table = pa.Table.from_pandas(pd.DataFrame(data))
         pq.write_table(table, parquet_file)
 
@@ -163,17 +167,20 @@ def main(args, api):
 def get_args():
     parser = argparse.ArgumentParser(description='Upload images to Hugging Face Datasets')
     parser.add_argument('--repo_id', type=str, default='GleghornLab/MedIMG', help='Hugging Face repository ID')
+    parser.add_argument('--data_location', type=str, default='E:/medimg/', help='Local filepath')
     parser.add_argument('--batch_size', type=int, default=10000, help='Number of images to upload in each batch')
     parser.add_argument('--base_path', type=str, default='E:/medimg', help='Base path to search for images')
     parser.add_argument('--split', type=int, default=1, help='Starting split number')
+    parser.add_argument('--test', action='store_true', help='Test file parsing, no upload')
     return parser.parse_args()
 
 
 if __name__ == '__main__':
     args = get_args()
-    folders = [ex.replace('\\', '/') for ex in glob(f'{args.repo_id}*') if not ex.endswith('z01')]
+    folders = [ex.replace('\\', '/') for ex in glob(f'{args.data_location}*') if not ex.endswith('z01')]
     print(folders)
-    args.image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.dcm')
+    args.extensions_to_ignore = ('.h5', '.raw', '.csv', '.tsv', '.txt', '.xlsx')
+    args.image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.dcm', '.tif', '.ima')
     args.medical_image_extensions = ('.mhd', '.nii')
     
     args.parquet_file = 'images.parquet'
@@ -181,6 +188,5 @@ if __name__ == '__main__':
     # login if needed
     # from huggingface_hub import login
     # login()
-    api = HfApi()
-    create_repo(repo_id=args.repo_id, repo_type='dataset', exist_ok=True)
-    main(args, api)
+
+    main(args)
